@@ -91,8 +91,10 @@ st.markdown(
         color: var(--ink); display: block; font-size: .76rem;
         letter-spacing: .08em; margin-bottom: .25rem; text-transform: uppercase;
     }
-    .stPlotlyChart { background: #FFFFFF; border: 1px solid var(--line);
-        border-radius: 7px; padding: .25rem; }
+    .stPlotlyChart {
+        background: #FFFFFF; border-radius: 7px;
+        box-shadow: 0 0 0 1px var(--line); padding: 0;
+    }
     div[data-testid="stMetric"] {
         background: #FFFFFF; border: 1px solid var(--line); border-radius: 7px;
         padding: .65rem .8rem;
@@ -100,6 +102,19 @@ st.markdown(
     div[data-testid="stMetric"] [data-testid="stMetricLabel"],
     div[data-testid="stMetric"] [data-testid="stMetricValue"] {
         color: var(--ink) !important;
+    }
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] *,
+    [role="listbox"] [role="option"] {
+        color: var(--ink) !important;
+    }
+    [data-testid="stSelectbox"] [role="combobox"] {
+        color: #EDEBE8 !important;
+    }
+    [role="listbox"] { background-color: #FFFFFF !important; }
+    [role="listbox"] [role="option"]:hover,
+    [role="listbox"] [role="option"][aria-selected="true"] {
+        background-color: #EAF4F8 !important;
     }
     @media print {
         @page { size: A4 landscape; margin: 0.38in; }
@@ -129,7 +144,7 @@ st.markdown(
         }
         .stPlotlyChart {
             background: #FFFFFF !important; border: 0 !important;
-            padding: 0 !important;
+            box-shadow: none !important; padding: 0 !important;
         }
         .feature-heading { margin-top: 0 !important; }
         .report-title { font-size: 1.65rem !important; }
@@ -214,6 +229,7 @@ def _polish_figure(
 def _show_figure(figure: go.Figure, key: str) -> None:
     st.plotly_chart(
         figure,
+        theme=None,
         width="stretch",
         config={
             "displaylogo": False,
@@ -298,7 +314,22 @@ def render_routing(data: dict[str, Any]) -> None:
             yaxis_title="TRANSACTION_TYPE_CODE · CONTINUITY_QFLAG",
             height=380,
         )
-        _show_figure(_polish_figure(figure, "Participants by route type and continuity"), "routing")
+        figure = _polish_figure(
+            figure, "Participants by route type and continuity"
+        )
+        figure.update_layout(
+            title={"text": "Participants by route type and continuity", "x": 0.5, "xanchor": "center"},
+            margin={"l": 165, "r": 45, "t": 75, "b": 70},
+        )
+        figure.update_xaxes(
+            title_font={"color": COLORS["navy"]},
+            tickfont={"color": COLORS["navy"]},
+        )
+        figure.update_yaxes(
+            title_font={"color": COLORS["navy"]},
+            tickfont={"color": COLORS["navy"]},
+        )
+        _show_figure(figure, "routing")
         _interpretation(
             "Direct payments usually travel between an ordering institution and a beneficiary institution, "
             "so a two-participant route is structurally expected. Indirect and covered payments involve "
@@ -625,8 +656,8 @@ def render_anomalies(data: dict[str, Any]) -> None:
             rows=2,
             cols=1,
             subplot_titles=("Transactions by anomaly class · log count", "Anomaly USD_AMOUNT quartiles · log scale"),
-            row_heights=[0.37, 0.63],
-            vertical_spacing=0.2,
+            row_heights=[0.42, 0.58],
+            vertical_spacing=0.35,
         )
         figure.add_trace(
             go.Bar(
@@ -673,11 +704,24 @@ def render_anomalies(data: dict[str, Any]) -> None:
         figure.update_yaxes(
             type="log", title_text="USD_AMOUNT ($)", row=2, col=1
         )
-        figure.update_xaxes(title_text="ANOMALY_TYPE", tickangle=-22, row=1, col=1)
-        figure.update_xaxes(title_text="ANOMALY_TYPE", tickangle=-22, row=2, col=1)
-        figure.update_layout(height=470, barmode="group")
+        figure.update_xaxes(tickangle=-22, row=1, col=1)
+        figure.update_xaxes(tickangle=-22, row=2, col=1)
+        figure.update_layout(barmode="group")
+        figure = _polish_figure(
+            figure, "Anomaly prevalence and amount signatures", 600
+        )
+        figure.update_layout(
+            margin={"l": 58, "r": 30, "t": 105, "b": 60},
+            legend={
+                "orientation": "h",
+                "x": 1,
+                "xanchor": "right",
+                "y": 1.12,
+                "yanchor": "bottom",
+            },
+        )
         _show_figure(
-            _polish_figure(figure, "Anomaly prevalence and amount signatures", 470),
+            figure,
             "anomaly-signatures",
         )
         _interpretation(
@@ -725,6 +769,8 @@ def render_tokens(data: dict[str, Any]) -> None:
                         x=TOKEN_NAMES,
                         y=frequencies,
                         name=f"Type {party_type}",
+                        legendgroup=party_type,
+                        showlegend=column == 1,
                         marker_color=type_colors[party_type],
                         customdata=transactions,
                         hovertemplate=(
@@ -740,9 +786,22 @@ def render_tokens(data: dict[str, Any]) -> None:
         figure.update_yaxes(title_text="Token occurrences", row=1, col=2)
         figure.update_xaxes(title_text="Token class", row=1, col=1)
         figure.update_xaxes(title_text="Token class", row=1, col=2)
-        figure.update_layout(barmode="group", height=390)
+        figure.update_layout(barmode="group")
+        figure = _polish_figure(
+            figure, "Token frequencies by party role and type", 440
+        )
+        figure.update_layout(
+            margin={"l": 58, "r": 30, "t": 105, "b": 60},
+            legend={
+                "orientation": "h",
+                "x": 1,
+                "xanchor": "right",
+                "y": 1.12,
+                "yanchor": "bottom",
+            },
+        )
         _show_figure(
-            _polish_figure(figure, "Token frequencies by party role and type"),
+            figure,
             "party-tokens",
         )
         _interpretation(
@@ -781,11 +840,6 @@ metric_columns[2].metric(
 metric_columns[3].metric(
     "Anomaly-labelled",
     f"{metadata['total_rows'] - summary['feature_group_5_anomaly_fraud_signatures']['by_anomaly_type']['NORMAL']['count']:,}",
-)
-st.caption(
-    "Source: dashboard/data/part_*.csv · "
-    "Summary: dashboard/output/dashboard_summary.json · "
-    "Use Chrome Print → Save as PDF for the six-section executive report."
 )
 st.divider()
 
