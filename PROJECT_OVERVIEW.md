@@ -7,6 +7,9 @@ UMDAC Datathon 2026 Preliminary Round. It reconstructs transaction-routing,
 foreign-exchange, settlement-latency, temporal, currency-corridor, anomaly, and
 party-text patterns, then presents the findings in a printable Streamlit report.
 
+GitHub repository: [CHONGLUNJIEA/dashboard](https://github.com/CHONGLUNJIEA/dashboard)
+(private).
+
 The ETL processed **1,048,575 transactions** from six CSV parts. The generated
 summary is `output/dashboard_summary.json` (about 4.3 MB).
 
