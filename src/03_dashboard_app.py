@@ -97,6 +97,10 @@ st.markdown(
         background: #FFFFFF; border: 1px solid var(--line); border-radius: 7px;
         padding: .65rem .8rem;
     }
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: var(--ink) !important;
+    }
     @media print {
         @page { size: A4 landscape; margin: 0.38in; }
         html, body, .stApp, [data-testid="stAppViewContainer"] {
