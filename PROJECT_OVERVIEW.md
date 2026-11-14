@@ -39,18 +39,33 @@ unchanged.
 
 ## Run locally
 
-From this directory in PowerShell:
+### Open the dashboard in Chrome
+
+1. Open the `dashboard` project folder in VS Code, then open **Terminal → New
+   Terminal**. The terminal should be at the project root (the folder containing
+   `requirements.txt`).
+2. Install the dependencies the first time you set up the project:
 
 ```powershell
 python -m pip install -r .\requirements.txt
-python .\src\02_etl_aggregator.py
+```
+
+3. Start the Streamlit app:
+
+```powershell
 python -m streamlit run .\src\03_dashboard_app.py
 ```
 
-Open the Streamlit URL shown in the terminal (normally
-`http://localhost:8501`). Keep that terminal open while using the dashboard;
-press `Ctrl+C` there to stop the server. Chrome's **Print → Save as PDF**
-produces a landscape report with a page break before each feature group.
+4. Open Chrome and visit `http://localhost:8501`, or use the **Local URL**
+   printed in the terminal. If port 8501 is already in use, Streamlit may show a
+   different port; use the URL it prints.
+
+Keep the terminal open while using the dashboard. Press `Ctrl+C` in that
+terminal to stop the server. The checked-in `output/dashboard_summary.json` is
+ready to use; rerun `python .\src\02_etl_aggregator.py` from the project root
+only if you need to regenerate the summary from the CSV files. Chrome's
+**Print → Save as PDF** produces a landscape report with a page break before
+each feature group.
 
 ## ETL outputs and reconstructed rules
 
