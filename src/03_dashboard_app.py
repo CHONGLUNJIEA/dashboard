@@ -122,6 +122,12 @@ st.markdown(
             background: #FFFFFF !important; color: #172B3A !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
+        html, body, #root, .stApp, [data-testid="stAppViewContainer"],
+        [data-testid="stMain"], [data-testid="stMainBlockContainer"],
+        [data-testid="stAppViewBlockContainer"] {
+            height: auto !important; min-height: 0 !important;
+            max-height: none !important; overflow: visible !important;
+        }
         [data-testid="stHeader"], [data-testid="stToolbar"],
         [data-testid="stSidebar"], #MainMenu, footer,
         .stDeployButton, button, .stSelectbox {
