@@ -180,9 +180,9 @@ def _yes_no(passed: bool) -> str:
     return "PASS" if passed else "CHECK"
 
 
-def _rule_callout(text: str) -> None:
+def _evidence_callout(title: str, text: str) -> None:
     st.markdown(
-        '<div class="rule-card"><strong>Reconstructed Business Rule(s)</strong>'
+        f'<div class="rule-card"><strong>{title}</strong>'
         f"<p>{text}</p></div>",
         unsafe_allow_html=True,
     )
@@ -226,9 +226,10 @@ def _polish_figure(
     return figure
 
 
-def _show_figure(figure: go.Figure, key: str) -> None:
+def _show_figure(figure: go.Figure, key: str, alt: str) -> None:
     st.plotly_chart(
         figure,
+        alt=alt,
         theme=None,
         width="stretch",
         config={
@@ -258,11 +259,13 @@ def render_routing(data: dict[str, Any]) -> None:
 
     with _section_container(1):
         _section_header(1, "Routing Topology & Network Structure")
-        _rule_callout(
-            f"<b>Direct ⇒ participant_count = 2</b> "
+        _evidence_callout(
+            "Dataset validation",
+            "Observed structure is consistent with the payment-type definitions: "
+            f"Direct routes have exactly 2 participants "
             f"({_yes_no(direct_check['passed'])}, "
             f"{_number(direct_check['rows'])} rows); "
-            "<b>Indirect/Covered ⇒ participant_count ≥ 3</b> "
+            "Indirect/Covered routes have at least 3 participants "
             f"(Indirect {_yes_no(indirect_checks['Indirect']['passed'])}; "
             f"Covered {_yes_no(indirect_checks['Covered']['passed'])}). "
             "Heatmap rows separate CONTINUITY_QFLAG = Y and N."
@@ -329,7 +332,11 @@ def render_routing(data: dict[str, Any]) -> None:
             title_font={"color": COLORS["navy"]},
             tickfont={"color": COLORS["navy"]},
         )
-        _show_figure(figure, "routing")
+        _show_figure(
+            figure,
+            "routing",
+            "Direct routes have two participants; Indirect and Covered routes have at least three.",
+        )
         _interpretation(
             "Direct payments usually travel between an ordering institution and a beneficiary institution, "
             "so a two-participant route is structurally expected. Indirect and covered payments involve "
@@ -340,27 +347,72 @@ def render_routing(data: dict[str, Any]) -> None:
 def render_fx(data: dict[str, Any]) -> None:
     section = data["feature_group_2_fx_settlement_latency"]
     rows = section["by_transaction_type_and_currency_conversion_count"]
+    participant_fx_rows = section[
+        "by_transaction_type_participant_count_and_fx_count"
+    ]
     check = section["direct_fx_rule"]
     ratios = {
         row["transaction_type_code"]: row
         for row in section["median_latency_comparison_fx_gte_3_vs_lt_3"]
     }
-    direct_ratio = ratios.get("Direct", {}).get("gte_3_to_lt_3_median_ratio")
     indirect_ratio = ratios.get("Indirect", {}).get("gte_3_to_lt_3_median_ratio")
     covered_ratio = ratios.get("Covered", {}).get("gte_3_to_lt_3_median_ratio")
+    controlled_cohort = {
+        row["currency_conversion_count"]: row
+        for row in participant_fx_rows
+        if row["transaction_type_code"] == "Indirect"
+        and row["participant_count"] == 4
+        and row["currency_conversion_count"] in (1, 3)
+    }
+    if set(controlled_cohort) != {1, 3}:
+        raise ValueError(
+            "Expected Indirect payments with four participants and one and "
+            "three FX conversions in the controlled duration summary."
+        )
+    low_sample_high_fx = [
+        row
+        for row in rows
+        if row["currency_conversion_count"] is not None
+        and row["currency_conversion_count"] >= 8
+        and row["count"] < 30
+    ]
+    low_sample_summary = "; ".join(
+        f"{row['transaction_type_code']} at {row['currency_conversion_count']} "
+        f"conversions (n={row['count']:,})"
+        for row in low_sample_high_fx
+    ) or "none"
+    frame = pd.DataFrame(rows).dropna(
+        subset=["currency_conversion_count", "median"]
+    )
 
     with _section_container(2):
         _section_header(2, "Foreign Exchange (FX) Steps & Settlement Latency")
-        _rule_callout(
-            f"<b>Direct ⇒ FX steps ≤ 1</b> ({_yes_no(check['passed'])}; "
-            f"observed maximum {section['direct_max_fx_steps']}). "
-            "<b>FX ≥ 3 ⇒ compare median TOTAL_DURATION with FX &lt; 3</b>: "
-            f"Indirect ratio {_number(indirect_ratio, 2)}×; "
-            f"Covered ratio {_number(covered_ratio, 2)}×; "
-            f"Direct ratio {_number(direct_ratio, 2)} (no FX ≥ 3 observations)."
+        _evidence_callout(
+            "Inferred relationship (observational, not causal)",
+            "Controlled cohort (Indirect; exactly 4 participants): median "
+            "TOTAL_DURATION is "
+            f"{_number(controlled_cohort[1]['median'], 1)} (n="
+            f"{_number(controlled_cohort[1]['count'])}) at 1 conversion versus "
+            f"{_number(controlled_cohort[3]['median'], 1)} (n="
+            f"{_number(controlled_cohort[3]['count'])}) at 3 conversions; "
+            "this fixed-participant cohort does not show an increase. "
+            "Across route types, at ≥3 FX steps versus &lt;3, median "
+            "TOTAL_DURATION rises from "
+            f"{_number(ratios['Indirect']['median_fx_lt_3'])} to "
+            f"{_number(ratios['Indirect']['median_fx_gte_3'])} for Indirect "
+            f"({_number(indirect_ratio, 2)}×), and from "
+            f"{_number(ratios['Covered']['median_fx_lt_3'])} to "
+            f"{_number(ratios['Covered']['median_fx_gte_3'])} for Covered "
+            f"({_number(covered_ratio, 2)}×). "
+            "The pooled association may reflect route mix and is not consistent "
+            "within every fixed-participant cohort. Direct has no "
+            "observations with ≥3 FX steps. This is a measured association, "
+            f"not a causal claim. Dataset validation: Direct's maximum was "
+            f"{section['direct_max_fx_steps']} FX step(s) "
+            f"({_yes_no(check['passed'])}). High-FX groups (≥8 conversions) "
+            f"with n &lt; 30 are low-confidence: {low_sample_summary}."
         )
 
-        frame = pd.DataFrame(rows).dropna(subset=["currency_conversion_count", "median"])
         figure = go.Figure()
         for transaction_type, color in (
             ("Direct", COLORS["blue"]),
@@ -373,6 +425,11 @@ def render_fx(data: dict[str, Any]) -> None:
             if subset.empty:
                 continue
             median = subset["median"].astype(float)
+            low_sample = subset["count"] < 30
+            customdata = subset[["count", "mean"]].copy()
+            customdata["sample_note"] = low_sample.map(
+                {True: "low confidence (n < 30)", False: "n ≥ 30"}
+            )
             figure.add_trace(
                 go.Scatter(
                     x=subset["currency_conversion_count"],
@@ -380,7 +437,13 @@ def render_fx(data: dict[str, Any]) -> None:
                     mode="lines+markers",
                     name=transaction_type,
                     line={"color": color, "width": 3},
-                    marker={"size": 8},
+                    marker={
+                        "size": 8,
+                        "symbol": [
+                            "circle-open" if is_low else "circle"
+                            for is_low in low_sample
+                        ],
+                    },
                     error_y={
                         "type": "data",
                         "symmetric": False,
@@ -390,13 +453,14 @@ def render_fx(data: dict[str, Any]) -> None:
                         "thickness": 1.5,
                         "width": 4,
                     },
-                    customdata=subset[["count", "mean"]].to_numpy(),
+                    customdata=customdata.to_numpy(),
                     hovertemplate=(
                         f"{transaction_type}<br>FX steps: %{{x}}"
                         "<br>Median duration: %{y:,.1f}"
                         "<br>IQR: p25–p75"
-                        "<br>Transactions: %{customdata[0]:,}"
-                        "<br>Mean duration: %{customdata[1]:,.1f}<extra></extra>"
+                        "<br>n (valid durations): %{customdata[0]:,}"
+                        "<br>Mean duration: %{customdata[1]:,.1f}"
+                        "<br>Sample note: %{customdata[2]}<extra></extra>"
                     ),
                 )
             )
@@ -420,6 +484,11 @@ def render_fx(data: dict[str, Any]) -> None:
         _show_figure(
             _polish_figure(figure, "Settlement latency by FX conversion count"),
             "fx-latency",
+            "At four participants, Indirect median duration is lower at three FX steps than one; pooled latency differs by route type.",
+        )
+        st.caption(
+            "Open markers and hover labels identify low-confidence groups "
+            "(n < 30); n counts records with a valid TOTAL_DURATION."
         )
         _interpretation(
             "Every currency conversion can add pricing, liquidity, correspondent-bank, and settlement coordination. "
@@ -435,7 +504,8 @@ def render_temporal(data: dict[str, Any]) -> None:
 
     with _section_container(3):
         _section_header(3, "Temporal Dynamics & Working-Hour Rhythms")
-        _rule_callout(
+        _evidence_callout(
+            "Analysis method",
             "<b>EPOCH_SECONDS → UTC hour ∈ [0, 23] and weekday ∈ [0, 6]</b> "
             "(0 = Monday). Volume and median USD_AMOUNT are grouped by UTC hour, "
             "weekday, ORDERING_TYPE ∈ {B, C}, and the six selected currencies; "
@@ -507,6 +577,7 @@ def render_temporal(data: dict[str, Any]) -> None:
                 f"{metric_label} · {currency} · ORDERING_TYPE {ordering_type}",
             ),
             "temporal-patterns",
+            f"{metric_label} by UTC hour and weekday for {currency}, ordering type {ordering_type}.",
         )
         _interpretation(
             "Payment instructions are created and processed across markets that open and close at different local times. "
@@ -524,13 +595,17 @@ def render_corridors(data: dict[str, Any]) -> None:
 
     with _section_container(4):
         _section_header(4, "Currency Corridors & Party-Type Value Flows")
-        _rule_callout(
+        _evidence_callout(
+            "Comparison method",
             f"<b>BIC country = BIC8[4:6]</b>; a match is an observed currency equal "
-            "to the mapped country currency (including Eurozone → EUR). Match rates "
-            f"among comparable rows: ordering {_percent(ordering_rate)} "
-            f"({_number(alignment['ordering']['comparable_rows'])} rows), "
-            f"beneficiary {_percent(beneficiary_rate)} "
-            f"({_number(alignment['beneficiary']['comparable_rows'])} rows). "
+            "to the mapped country currency (including Eurozone → EUR). Rates are "
+            "matched rows ÷ comparable rows: ordering "
+            f"{_number(alignment['ordering']['match_rows'])} / "
+            f"{_number(alignment['ordering']['comparable_rows'])} = "
+            f"{_percent(ordering_rate)}; beneficiary "
+            f"{_number(alignment['beneficiary']['match_rows'])} / "
+            f"{_number(alignment['beneficiary']['comparable_rows'])} = "
+            f"{_percent(beneficiary_rate)}. "
             "USD_AMOUNT is compared across B→B, B→C, C→B, and C→C."
         )
 
@@ -546,7 +621,13 @@ def render_corridors(data: dict[str, Any]) -> None:
         )
         roles = ["ordering", "beneficiary"]
         role_rates = [alignment[role]["match_rate"] for role in roles]
-        role_counts = [alignment[role]["comparable_rows"] for role in roles]
+        role_counts = [
+            [
+                alignment[role]["match_rows"],
+                alignment[role]["comparable_rows"],
+            ]
+            for role in roles
+        ]
         figure.add_trace(
             go.Bar(
                 x=["Ordering BIC", "Beneficiary BIC"],
@@ -557,7 +638,8 @@ def render_corridors(data: dict[str, Any]) -> None:
                 customdata=role_counts,
                 hovertemplate=(
                     "%{x}<br>Match rate: %{y:.1f}%"
-                    "<br>Comparable rows: %{customdata:,}<extra></extra>"
+                    "<br>Matched rows: %{customdata[0]:,}"
+                    "<br>Comparable rows: %{customdata[1]:,}<extra></extra>"
                 ),
                 showlegend=False,
             ),
@@ -617,6 +699,7 @@ def render_corridors(data: dict[str, Any]) -> None:
         _show_figure(
             _polish_figure(figure, "Currency alignment and corridor values", 410),
             "currency-corridors",
+            "Ordering BICs match mapped currencies more often than beneficiary BICs; corridor amounts vary by party type.",
         )
         _interpretation(
             "A sender's domestic currency commonly aligns with the ordering institution's home market, while the beneficiary "
@@ -634,32 +717,31 @@ def render_anomalies(data: dict[str, Any]) -> None:
     ceo = checks["CEO_SCAM"]
     fat_finger = summaries["FAT_FINGER_MISTAKE"]
     fat_quantiles = fat_finger["usd_amount_quantiles"]
+    customer_recall_count = summaries.get("CUSTOMER_RECALL", {}).get("count", 0)
 
     with _section_container(5):
-        _section_header(5, "Anomaly Detection & Fraud Typology Rules")
-        _rule_callout(
-            "<b>ROMANCE_SCAM ⇒ ORDERING_TYPE = C</b> "
-            f"({_yes_no(romance['passed'])}; {romance['rows']:,} rows); "
-            "<b>CEO_SCAM ⇒ ORDERING_TYPE = B</b> "
-            f"({_yes_no(ceo['passed'])}; {ceo['rows']:,} rows). "
-            f"FAT_FINGER_MISTAKE median USD_AMOUNT = "
+        _section_header(5, "Anomaly Labels, Party Types & Amount Signals")
+        _evidence_callout(
+            "Dataset validation",
+            "Observed structure is consistent with the anomaly definitions: "
+            f"all {romance['rows']:,} Romance Scam rows have ORDERING_TYPE=C "
+            f"({_yes_no(romance['passed'])}); all {ceo['rows']:,} CEO Scam rows "
+            f"have ORDERING_TYPE=B ({_yes_no(ceo['passed'])}). "
+            f"Exploratory amount signal: FAT_FINGER_MISTAKE median USD_AMOUNT = "
             f"${_number(fat_quantiles.get('median'), 2)}; "
             f"1.5×IQR upper fence = ${_number(outliers['iqr_upper_fence'], 2)}, "
             f"with {outliers['high_outlier_count']:,} high outliers. "
-            "Blank ANOMALY_TYPE values are counted as NORMAL."
+            "Blank ANOMALY_TYPE values are counted as NORMAL; outliers are review "
+            "signals, not confirmed fraud. Specification discrepancy: "
+            f"CUSTOMER_RECALL occurs in {customer_recall_count:,} dataset rows "
+            "but is not among the five anomaly examples listed in the case-study "
+            "brief; it is retained as an observed category, not dropped."
         )
 
         labels = [name for name in ANOMALY_ORDER if name in summaries]
         counts = [summaries[name]["count"] for name in labels]
         anomaly_labels = [name for name in labels if name != "NORMAL"]
-        figure = make_subplots(
-            rows=2,
-            cols=1,
-            subplot_titles=("Transactions by anomaly class · log count", "Anomaly USD_AMOUNT quartiles · log scale"),
-            row_heights=[0.42, 0.58],
-            vertical_spacing=0.35,
-        )
-        figure.add_trace(
+        count_figure = go.Figure(
             go.Bar(
                 x=labels,
                 y=counts,
@@ -671,10 +753,104 @@ def render_anomalies(data: dict[str, Any]) -> None:
                 textposition="outside",
                 showlegend=False,
                 hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>",
-            ),
-            row=1,
-            col=1,
+            )
         )
+        count_figure.update_yaxes(type="log", title_text="Transactions")
+        count_figure.update_xaxes(tickangle=-35, automargin=True)
+        count_figure = _polish_figure(
+            count_figure, "Transactions by anomaly class · log count", 390
+        )
+        count_figure.update_layout(
+            margin={"l": 75, "r": 30, "t": 80, "b": 135},
+            showlegend=False,
+        )
+        _show_figure(
+            count_figure,
+            "anomaly-counts",
+            "Transaction counts by anomaly class; NORMAL is the largest group.",
+        )
+
+        ordering_types_found = {
+            party_type
+            for name in labels
+            for party_type in summaries[name][
+                "ordering_type_to_beneficiary_type"
+            ]
+        }
+        party_types = [
+            party_type
+            for party_type in ("B", "C", "UNKNOWN")
+            if party_type in ordering_types_found
+        ]
+        party_colors = {
+            "B": COLORS["blue"],
+            "C": COLORS["teal"],
+            "UNKNOWN": COLORS["slate"],
+        }
+        party_figure = go.Figure()
+        for party_type in party_types:
+            party_shares = []
+            hover_counts = []
+            for name in labels:
+                breakdown = summaries[name]["ordering_type_to_beneficiary_type"]
+                count = sum(breakdown.get(party_type, {}).values())
+                total = summaries[name]["count"]
+                party_shares.append(100 * count / total if total else 0)
+                hover_counts.append([count, total])
+            party_figure.add_trace(
+                go.Bar(
+                    x=labels,
+                    y=party_shares,
+                    name=f"ORDERING_TYPE {party_type}",
+                    marker_color=party_colors.get(party_type, COLORS["slate"]),
+                    customdata=hover_counts,
+                    text=[
+                        f"{share:.0f}%" if share >= 5 else ""
+                        for share in party_shares
+                    ],
+                    textposition="inside",
+                    insidetextanchor="middle",
+                    textfont={"size": 12, "color": "#FFFFFF"},
+                    hovertemplate=(
+                        "%{x}<br>ORDERING_TYPE "
+                        + party_type
+                        + ": %{customdata[0]:,} (%{y:.1f}%)"
+                        "<br>Anomaly records: %{customdata[1]:,}<extra></extra>"
+                    ),
+                ),
+            )
+        party_figure.update_layout(barmode="stack")
+        party_figure.update_yaxes(
+            title_text="Share within anomaly class (%)", range=[0, 100]
+        )
+        party_figure.update_xaxes(tickangle=-35, automargin=True)
+        party_figure = _polish_figure(
+            party_figure,
+            "Ordering party type by anomaly class · 100% stacked",
+            430,
+        )
+        party_figure.update_layout(
+            margin={"l": 85, "r": 30, "t": 90, "b": 140},
+            legend={
+                "orientation": "h",
+                "x": 1,
+                "xanchor": "right",
+                "y": 1.02,
+                "yanchor": "bottom",
+            },
+        )
+        _show_figure(
+            party_figure,
+            "anomaly-party-type",
+            "Romance Scam is all consumer ordering parties; CEO Scam is all business ordering parties.",
+        )
+        st.caption(
+            "The 100% stacked bars show ordering-party type within each anomaly "
+            "class (B = business, C = consumer); hover reports the supporting "
+            "row counts."
+        )
+
+        amount_figure = go.Figure()
         for field, color, label in (
             ("p25", COLORS["blue"], "p25"),
             ("median", COLORS["gold"], "Median"),
@@ -684,7 +860,7 @@ def render_anomalies(data: dict[str, Any]) -> None:
                 summaries[name]["usd_amount_quantiles"].get(field)
                 for name in anomaly_labels
             ]
-            figure.add_trace(
+            amount_figure.add_trace(
                 go.Scatter(
                     x=anomaly_labels,
                     y=values,
@@ -696,22 +872,17 @@ def render_anomalies(data: dict[str, Any]) -> None:
                     hovertemplate=(
                         f"%{{x}}<br>{label}: $%{{y:,.2f}}<extra></extra>"
                     ),
-                ),
-                row=2,
-                col=1,
+                )
             )
-        figure.update_yaxes(type="log", title_text="Transactions", row=1, col=1)
-        figure.update_yaxes(
-            type="log", title_text="USD_AMOUNT ($)", row=2, col=1
+        amount_figure.update_yaxes(
+            type="log", title_text="USD_AMOUNT ($)"
         )
-        figure.update_xaxes(tickangle=-22, row=1, col=1)
-        figure.update_xaxes(tickangle=-22, row=2, col=1)
-        figure.update_layout(barmode="group")
-        figure = _polish_figure(
-            figure, "Anomaly prevalence and amount signatures", 600
+        amount_figure.update_xaxes(tickangle=-35, automargin=True)
+        amount_figure = _polish_figure(
+            amount_figure, "Anomaly USD_AMOUNT quartiles · log scale", 430
         )
-        figure.update_layout(
-            margin={"l": 58, "r": 30, "t": 105, "b": 60},
+        amount_figure.update_layout(
+            margin={"l": 80, "r": 30, "t": 90, "b": 140},
             legend={
                 "orientation": "h",
                 "x": 1,
@@ -721,29 +892,64 @@ def render_anomalies(data: dict[str, Any]) -> None:
             },
         )
         _show_figure(
-            figure,
-            "anomaly-signatures",
+            amount_figure,
+            "anomaly-amount-quartiles",
+            "Amount quartiles vary across anomaly classes, with the largest values in selected classes.",
         )
         _interpretation(
-            "Romance and executive-impersonation cases exploit different trust relationships, which is consistent with "
-            "their observed customer-versus-business ordering-party constraints. Recall, duplicate, account-replacement, "
-            "and input-error labels are distinct operational signals; an unusual amount is a review cue, not proof of fraud."
+            "The ordering-party breakdown directly shows Romance Scam rows as consumer (C) and CEO Scam rows as business (B). "
+            "CUSTOMER_RECALL is preserved as an additional dataset label pending clarification of the brief/data discrepancy. "
+            "An unusual amount remains a review cue, not proof of fraud."
         )
 
 
 def render_tokens(data: dict[str, Any]) -> None:
-    token_data = data["feature_group_6_tokenized_party_details"][
+    section = data["feature_group_6_tokenized_party_details"]
+    token_data = section[
         "frequency_and_transaction_counts_by_role_type_and_token"
     ]
+    record_counts = section["record_counts_by_party_type"]
+    ordering_business_records = record_counts["ordering"].get("B", 0)
+    ordering_consumer_records = record_counts["ordering"].get("C", 0)
+    ordering_business_token_count = token_data["ordering"]["B"]["business"][
+        "transactions_with_token"
+    ]
+    ordering_consumer_business_token_count = token_data["ordering"]["C"][
+        "business"
+    ]["transactions_with_token"]
+    business_token_rate = (
+        ordering_business_token_count / ordering_business_records * 1000
+        if ordering_business_records
+        else None
+    )
+    consumer_business_token_rate = (
+        ordering_consumer_business_token_count / ordering_consumer_records * 1000
+        if ordering_consumer_records
+        else None
+    )
+    business_token_comparison = (
+        "The consumer baseline is zero, so a finite B-to-C rate ratio is undefined."
+        if consumer_business_token_rate == 0
+        else (
+            "The B-to-C rate ratio is "
+            f"{_number(business_token_rate / consumer_business_token_rate, 2)}×."
+            if business_token_rate is not None
+            and consumer_business_token_rate is not None
+            else "A B-to-C rate ratio is unavailable because a party-type denominator is zero."
+        )
+    )
 
     with _section_container(6):
         _section_header(6, "Party Identity & Tokenized Text Patterns")
-        _rule_callout(
-            "<b>Token frequency = occurrences of &lt;iban:…&gt;, "
-            "&lt;business:…&gt;, and &lt;first_name:…&gt;</b>, grouped by "
-            "ORDERING_TYPE or BENEFICIARY_TYPE (B/C). Hover for the number of "
-            "transactions containing each token; ordering and beneficiary roles "
-            "are shown separately."
+        _evidence_callout(
+            "Normalized token evidence",
+            "Rate = transactions containing a token ÷ all records in that role "
+            "and party type × 1,000. For ordering-party &lt;business:...&gt; "
+            f"tokens: B (business) {_number(business_token_rate, 2)} per 1,000 "
+            f"records ({ordering_business_token_count:,}/{ordering_business_records:,}); "
+            f"C (consumer) {_number(consumer_business_token_rate, 2)} per 1,000 "
+            f"records ({ordering_consumer_business_token_count:,}/"
+            f"{ordering_consumer_records:,}). {business_token_comparison}"
         )
         figure = make_subplots(
             rows=1,
@@ -754,41 +960,57 @@ def render_tokens(data: dict[str, Any]) -> None:
         type_colors = {"B": COLORS["blue"], "C": COLORS["teal"]}
         for column, role in enumerate(("ordering", "beneficiary"), start=1):
             role_data = token_data.get(role, {})
+            role_record_counts = record_counts.get(role, {})
             for party_type in ("B", "C"):
                 type_data = role_data.get(party_type, {})
-                frequencies = [
-                    type_data.get(token, {}).get("frequency", 0)
-                    for token in TOKEN_NAMES
-                ]
+                denominator = role_record_counts.get(party_type, 0)
                 transactions = [
                     type_data.get(token, {}).get("transactions_with_token", 0)
                     for token in TOKEN_NAMES
                 ]
+                frequencies = [
+                    type_data.get(token, {}).get("frequency", 0)
+                    for token in TOKEN_NAMES
+                ]
+                rates = [
+                    count / denominator * 1000 if denominator else None
+                    for count in transactions
+                ]
+                hover_data = [
+                    [count, denominator, frequency]
+                    for count, frequency in zip(transactions, frequencies)
+                ]
                 figure.add_trace(
                     go.Bar(
                         x=TOKEN_NAMES,
-                        y=frequencies,
+                        y=rates,
                         name=f"Type {party_type}",
                         legendgroup=party_type,
                         showlegend=column == 1,
                         marker_color=type_colors[party_type],
-                        customdata=transactions,
+                        customdata=hover_data,
                         hovertemplate=(
-                            "%{x}<br>Token occurrences: %{y:,}"
-                            "<br>Transactions containing token: %{customdata:,}"
+                            "%{x}<br>Transactions per 1,000 records: %{y:.2f}"
+                            "<br>Transactions containing token: "
+                            "%{customdata[0]:,} / %{customdata[1]:,}"
+                            "<br>Raw token occurrences: %{customdata[2]:,}"
                             "<extra></extra>"
                         ),
                     ),
                     row=1,
                     col=column,
                 )
-        figure.update_yaxes(title_text="Token occurrences", row=1, col=1)
-        figure.update_yaxes(title_text="Token occurrences", row=1, col=2)
+        figure.update_yaxes(
+            title_text="Transactions per 1,000 records", row=1, col=1
+        )
+        figure.update_yaxes(
+            title_text="Transactions per 1,000 records", row=1, col=2
+        )
         figure.update_xaxes(title_text="Token class", row=1, col=1)
         figure.update_xaxes(title_text="Token class", row=1, col=2)
         figure.update_layout(barmode="group")
         figure = _polish_figure(
-            figure, "Token frequencies by party role and type", 440
+            figure, "Token prevalence per 1,000 party-type records", 440
         )
         figure.update_layout(
             margin={"l": 58, "r": 30, "t": 105, "b": 60},
@@ -803,11 +1025,16 @@ def render_tokens(data: dict[str, Any]) -> None:
         _show_figure(
             figure,
             "party-tokens",
+            "Token-containing transaction rates per 1,000 party-type records for ordering and beneficiary roles.",
+        )
+        st.caption(
+            "B = business; C = consumer. Rates count each record at most once "
+            "per token; hover also shows raw token occurrences."
         )
         _interpretation(
-            "IBAN tokens identify account references, while business names and personal names help distinguish legal entities "
-            "from individual customers in payment narratives. Differences in token frequency can reflect both party mix and "
-            "how much structured remittance information institutions supply."
+            "Per-1,000 rates normalize for different business and consumer record counts. In this dataset the ordering-party "
+            "<business:...> token appears only in B records; because the observed C rate is zero, report the two rates rather "
+            "than a finite relative-rate multiplier."
         )
 
 

@@ -189,6 +189,9 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
     routing_counts: Counter[tuple[Any, ...]] = Counter()
     routing_participant_counts: Counter[tuple[Any, ...]] = Counter()
     duration_values: defaultdict[tuple[Any, ...], list[np.ndarray]] = defaultdict(list)
+    participant_fx_duration_values: defaultdict[
+        tuple[Any, ...], list[np.ndarray]
+    ] = defaultdict(list)
     duration_row_counts: Counter[tuple[Any, ...]] = Counter()
     temporal_values: defaultdict[tuple[Any, ...], list[np.ndarray]] = defaultdict(list)
     corridor_values: defaultdict[tuple[Any, ...], list[np.ndarray]] = defaultdict(list)
@@ -196,6 +199,8 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
     anomaly_counts: Counter[tuple[Any, ...]] = Counter()
     anomaly_party_counts: Counter[tuple[Any, ...]] = Counter()
     alignment_counts: Counter[tuple[Any, ...]] = Counter()
+    ordering_type_record_counts: Counter[tuple[Any, ...]] = Counter()
+    beneficiary_type_record_counts: Counter[tuple[Any, ...]] = Counter()
     token_counts: dict[tuple[Any, ...], list[int]] = defaultdict(lambda: [0, 0])
     total_rows = 0
 
@@ -260,6 +265,16 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
                 duration_values,
                 chunk,
                 ["TRANSACTION_TYPE_CODE", "CURRENCY_CONVERSION_COUNT"],
+                "TOTAL_DURATION",
+            )
+            _add_group_values(
+                participant_fx_duration_values,
+                chunk,
+                [
+                    "TRANSACTION_TYPE_CODE",
+                    "PARTICIPANT_COUNT",
+                    "CURRENCY_CONVERSION_COUNT",
+                ],
                 "TOTAL_DURATION",
             )
 
@@ -338,6 +353,12 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
                 chunk,
                 ["ANOMALY_TYPE", "ORDERING_TYPE", "BENEFICIARY_TYPE"],
             )
+            _add_group_counts(
+                ordering_type_record_counts, chunk, ["ORDERING_TYPE"]
+            )
+            _add_group_counts(
+                beneficiary_type_record_counts, chunk, ["BENEFICIARY_TYPE"]
+            )
             _add_group_values(
                 anomaly_values, chunk, ["ANOMALY_TYPE"], "USD_AMOUNT"
             )
@@ -414,6 +435,14 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
     duration_rows = _rows_from_values(
         duration_values,
         ["transaction_type_code", "currency_conversion_count"],
+    )
+    participant_fx_duration_rows = _rows_from_values(
+        participant_fx_duration_values,
+        [
+            "transaction_type_code",
+            "participant_count",
+            "currency_conversion_count",
+        ],
     )
     for row in duration_rows:
         key = (row["transaction_type_code"], row["currency_conversion_count"])
@@ -594,6 +623,16 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
             "transactions_with_token": int(values[1]),
         }
 
+    record_counts_by_party_type = {}
+    for role, counts in (
+        ("ordering", ordering_type_record_counts),
+        ("beneficiary", beneficiary_type_record_counts),
+    ):
+        record_counts_by_party_type[role] = {
+            str(key[0]) if key[0] is not None else "UNKNOWN": int(count)
+            for key, count in counts.items()
+        }
+
     return {
         "metadata": {
             "source_files": [file.name for file in files],
@@ -601,7 +640,8 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
             "total_rows": total_rows,
             "blank_anomaly_type_treated_as": "NORMAL",
             "currency_country_mapping_coverage": (
-                "Match rates exclude unmapped BIC country codes and missing currencies."
+                "Match rates are matched rows divided by comparable rows; "
+                "comparable rows exclude unmapped BIC country codes and missing currencies."
             ),
         },
         "feature_group_1_routing_topology": {
@@ -610,6 +650,9 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
         },
         "feature_group_2_fx_settlement_latency": {
             "by_transaction_type_and_currency_conversion_count": duration_rows,
+            "by_transaction_type_participant_count_and_fx_count": (
+                participant_fx_duration_rows
+            ),
             "direct_max_fx_steps": max(known_direct_fx) if known_direct_fx else None,
             "direct_fx_rule": {
                 "passed": direct_fx_rows > 0 and not direct_fx_violations,
@@ -644,6 +687,7 @@ def _build_summary(files: list[Path]) -> dict[str, Any]:
             "fat_finger_high_amount_outliers": fat_finger_outliers,
         },
         "feature_group_6_tokenized_party_details": {
+            "record_counts_by_party_type": record_counts_by_party_type,
             "frequency_and_transaction_counts_by_role_type_and_token": token_summary,
         },
     }
