@@ -693,8 +693,6 @@ def render_temporal(data: dict[str, Any]) -> None:
                 x=list(range(24)),
                 y=list(range(len(volume_matrix))),
                 coloraxis="coloraxis",
-                xgap=1,
-                ygap=1,
                 customdata=volume_hover_data,
                 hovertemplate=(
                     "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
@@ -710,8 +708,6 @@ def render_temporal(data: dict[str, Any]) -> None:
                 x=list(range(24, 48)),
                 y=list(range(len(amount_matrix))),
                 coloraxis="coloraxis2",
-                xgap=1,
-                ygap=1,
                 customdata=amount_hover_data,
                 hovertemplate=(
                     "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
@@ -813,6 +809,28 @@ def render_temporal(data: dict[str, Any]) -> None:
             yref="paper",
             line={"color": "#FFFFFF", "width": 3},
         )
+        for boundary in (-0.5, 83.5):
+            figure.add_shape(
+                type="line",
+                x0=-0.5,
+                x1=47.5,
+                y0=boundary,
+                y1=boundary,
+                xref="x",
+                yref="y",
+                line={"color": "#FFFFFF", "width": 2.5},
+            )
+        for boundary in (-0.5, 47.5):
+            figure.add_shape(
+                type="line",
+                x0=boundary,
+                x1=boundary,
+                y0=0,
+                y1=1,
+                xref="x",
+                yref="paper",
+                line={"color": "#FFFFFF", "width": 2.5},
+            )
         for boundary in range(7, len(volume_matrix), 7):
             figure.add_shape(
                 type="line",
@@ -822,7 +840,7 @@ def render_temporal(data: dict[str, Any]) -> None:
                 y1=boundary - 0.5,
                 xref="x",
                 yref="y",
-                line={"color": "#FFFFFF", "width": 2},
+                line={"color": "#FFFFFF", "width": 2.5},
             )
         _show_figure(
             figure,
