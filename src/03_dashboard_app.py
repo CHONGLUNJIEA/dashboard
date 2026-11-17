@@ -642,80 +642,136 @@ def render_temporal(data: dict[str, Any]) -> None:
             "<b>EPOCH_SECONDS → UTC hour ∈ [0, 23] and weekday ∈ [0, 6]</b> "
             "(0 = Monday). Volume and median USD_AMOUNT are grouped by UTC hour, "
             "weekday, ORDERING_TYPE ∈ {B, C}, and the six selected currencies; "
-            "use the controls to inspect a single type/currency slice."
+            "the heatmaps compare B and C side by side for the selected currency "
+            "and measure."
         )
-        controls = st.columns([1, 1, 2])
+        controls = st.columns(2)
         currency = controls[0].selectbox(
             "Currency",
             currencies,
             index=currencies.index("EUR") if "EUR" in currencies else 0,
             key="temporal-currency",
         )
-        ordering_type = controls[1].selectbox(
-            "Ordering type",
-            ["B", "C"],
-            key="temporal-ordering-type",
-        )
-        metric_label = controls[2].selectbox(
+        metric_label = controls[1].selectbox(
             "Heatmap measure",
             ["Transaction volume", "Median USD amount"],
             key="temporal-measure",
         )
         metric_column = "count" if metric_label == "Transaction volume" else "median"
         frame = pd.DataFrame(rows)
-        selected = frame[
-            (frame["currency_code"] == currency)
-            & (frame["ordering_type"] == ordering_type)
+        selected = frame.loc[
+            frame["currency_code"].eq(currency)
+            & frame["ordering_type"].isin(["B", "C"])
         ]
-        matrix = (
-            selected.pivot(
-                index="utc_day_of_week",
-                columns="utc_hour_of_day",
-                values=metric_column,
-            )
-            .reindex(index=range(7), columns=range(24))
-        )
-        if metric_column == "count":
-            matrix = matrix.fillna(0)
-        figure = go.Figure(
-            go.Heatmap(
-                z=matrix.to_numpy(dtype=float),
-                x=list(range(24)),
-                y=list(range(7)),
-                colorscale="Teal",
-                colorbar={"title": metric_label},
-                hovertemplate=(
-                    "UTC hour: %{x}:00<br>Weekday: %{customdata}"
-                    "<br>" + metric_label + ": %{z:,.2f}<extra></extra>"
-                ),
-                customdata=[[DAY_NAMES[day]] * 24 for day in range(7)],
-            )
-        )
-        figure.update_xaxes(
-            title_text="UTC hour of day",
-            tickmode="array",
-            tickvals=list(range(0, 24, 2)),
-            ticktext=[f"{hour:02d}:00" for hour in range(0, 24, 2)],
-        )
-        figure.update_yaxes(
-            title_text="UTC day of week",
-            tickmode="array",
-            tickvals=list(range(7)),
-            ticktext=DAY_NAMES,
-            autorange="reversed",
-        )
-        _show_figure(
-            _polish_figure(
-                figure,
-                f"{metric_label} · {currency} · ORDERING_TYPE {ordering_type}",
-            ),
-            "temporal-patterns",
-            f"{metric_label} by UTC hour and weekday for {currency}, ordering type {ordering_type}.",
+        if selected.empty:
+            st.info(f"No temporal data is available for {currency}.")
+        else:
+            matrices = {}
+            for ordering_type in ("B", "C"):
+                type_rows = selected.loc[
+                    selected["ordering_type"].eq(ordering_type)
+                ]
+                matrix = type_rows.pivot(
+                    index="utc_day_of_week",
+                    columns="utc_hour_of_day",
+                    values=metric_column,
+                ).reindex(index=range(7), columns=range(24))
+                if metric_column == "count":
+                    matrix = matrix.fillna(0)
+                matrices[ordering_type] = matrix
+
+            available_values = selected[metric_column].dropna()
+            if available_values.empty:
+                st.info(f"No {metric_label.lower()} data is available for {currency}.")
+            else:
+                zmax = float(available_values.max())
+                if zmax <= 0:
+                    zmax = 1.0
+                figure = make_subplots(
+                    rows=1,
+                    cols=2,
+                    subplot_titles=(
+                        "ORDERING_TYPE B · Business",
+                        "ORDERING_TYPE C · Consumer",
+                    ),
+                    shared_xaxes=True,
+                    shared_yaxes=True,
+                    horizontal_spacing=0.08,
+                )
+                for col, ordering_type in enumerate(("B", "C"), start=1):
+                    matrix = matrices[ordering_type]
+                    figure.add_trace(
+                        go.Heatmap(
+                            z=matrix.to_numpy(dtype=float),
+                            x=list(range(24)),
+                            y=list(range(7)),
+                            zmin=0,
+                            zmax=zmax,
+                            colorscale="Teal",
+                            showscale=col == 2,
+                            colorbar={"title": metric_label, "x": 1.02},
+                            hovertemplate=(
+                                f"ORDERING_TYPE {ordering_type}"
+                                "<br>UTC hour: %{x}:00"
+                                "<br>Weekday: %{customdata}"
+                                f"<br>{metric_label}: %{{z:,.2f}}"
+                                "<extra></extra>"
+                            ),
+                            customdata=[
+                                [DAY_NAMES[day]] * 24 for day in range(7)
+                            ],
+                        ),
+                        row=1,
+                        col=col,
+                    )
+                figure.update_xaxes(
+                    title_text="UTC hour of day",
+                    tickmode="array",
+                    tickvals=list(range(0, 24, 2)),
+                    ticktext=[f"{hour:02d}:00" for hour in range(0, 24, 2)],
+                    row=1,
+                    col=1,
+                )
+                figure.update_xaxes(
+                    title_text="UTC hour of day",
+                    tickmode="array",
+                    tickvals=list(range(0, 24, 2)),
+                    ticktext=[f"{hour:02d}:00" for hour in range(0, 24, 2)],
+                    row=1,
+                    col=2,
+                )
+                for col in (1, 2):
+                    figure.update_yaxes(
+                        title_text="UTC day of week" if col == 1 else None,
+                        tickmode="array",
+                        tickvals=list(range(7)),
+                        ticktext=DAY_NAMES,
+                        autorange="reversed",
+                        row=1,
+                        col=col,
+                    )
+                title = (
+                    f"{metric_label} · {currency} · "
+                    "ORDERING_TYPE B vs C"
+                )
+                figure = _polish_figure(figure, title, height=440)
+                figure.update_layout(
+                    margin={"l": 70, "r": 90, "t": 100, "b": 65},
+                )
+                _show_figure(
+                    figure,
+                    "temporal-patterns",
+                    f"{metric_label} by UTC hour and weekday for {currency}, "
+                    "comparing business and consumer ordering parties.",
+                )
+        st.caption(
+            "Both heatmaps use the same color scale. Select a currency and "
+            "measure before printing; the PDF will show both B and C panels."
         )
         _interpretation(
             "Payment instructions are created and processed across markets that open and close at different local times. "
-            "The UTC heatmap makes global activity comparable, while currency and ordering-party filters help separate "
-            "market-hour effects from differences between business and consumer traffic."
+            "The UTC heatmaps make global activity comparable, and the paired B/C panels "
+            "help distinguish market-hour effects from differences between business and consumer traffic."
         )
 
 
