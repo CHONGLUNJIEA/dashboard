@@ -693,6 +693,8 @@ def render_temporal(data: dict[str, Any]) -> None:
                 x=list(range(24)),
                 y=list(range(len(volume_matrix))),
                 coloraxis="coloraxis",
+                xgap=1,
+                ygap=1,
                 customdata=volume_hover_data,
                 hovertemplate=(
                     "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
@@ -708,6 +710,8 @@ def render_temporal(data: dict[str, Any]) -> None:
                 x=list(range(24, 48)),
                 y=list(range(len(amount_matrix))),
                 coloraxis="coloraxis2",
+                xgap=1,
+                ygap=1,
                 customdata=amount_hover_data,
                 hovertemplate=(
                     "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
@@ -724,7 +728,7 @@ def render_temporal(data: dict[str, Any]) -> None:
         )
         figure.update_layout(
             font={"family": "Arial, sans-serif", "color": COLORS["navy"], "size": 8},
-            margin={"l": 115, "r": 20, "t": 95, "b": 100},
+            margin={"l": 115, "r": 20, "t": 130, "b": 100},
             coloraxis={
                 "colorscale": "Teal",
                 "cmin": 0,
@@ -758,7 +762,7 @@ def render_temporal(data: dict[str, Any]) -> None:
             title={
                 "text": "Temporal patterns · All currencies, measures, and ordering types",
                 "x": 0.02,
-                "y": 1.0,
+                "y": 0.98,
                 "xanchor": "left",
                 "yanchor": "top",
             },
@@ -784,7 +788,7 @@ def render_temporal(data: dict[str, Any]) -> None:
         figure.add_annotation(
             text="Transaction volume",
             x=11.5,
-            y=1.03,
+            y=1.08,
             xref="x",
             yref="paper",
             showarrow=False,
@@ -793,7 +797,7 @@ def render_temporal(data: dict[str, Any]) -> None:
         figure.add_annotation(
             text="Median USD amount",
             x=35.5,
-            y=1.03,
+            y=1.08,
             xref="x",
             yref="paper",
             showarrow=False,
@@ -807,7 +811,7 @@ def render_temporal(data: dict[str, Any]) -> None:
             y1=1,
             xref="x",
             yref="paper",
-            line={"color": "#FFFFFF", "width": 2},
+            line={"color": "#FFFFFF", "width": 3},
         )
         for boundary in range(7, len(volume_matrix), 7):
             figure.add_shape(
@@ -818,7 +822,7 @@ def render_temporal(data: dict[str, Any]) -> None:
                 y1=boundary - 0.5,
                 xref="x",
                 yref="y",
-                line={"color": "#FFFFFF", "width": 1},
+                line={"color": "#FFFFFF", "width": 2},
             )
         _show_figure(
             figure,
