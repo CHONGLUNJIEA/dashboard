@@ -632,146 +632,160 @@ def render_fx(data: dict[str, Any]) -> None:
 
 def render_temporal(data: dict[str, Any]) -> None:
     section = data["feature_group_3_temporal_circadian_patterns"]
-    rows = section["by_hour_day_ordering_type_and_currency"]
+    frame = pd.DataFrame(section["by_hour_day_ordering_type_and_currency"])
     currencies = sorted(section["top_currencies"])
+    row_specs = [
+        ("Transaction volume", "count", "B", "Volume · B"),
+        ("Transaction volume", "count", "C", "Volume · C"),
+        ("Median USD amount", "median", "B", "Median · B"),
+        ("Median USD amount", "median", "C", "Median · C"),
+    ]
 
     with _section_container(3):
         _section_header(3, "Temporal Dynamics & Working-Hour Rhythms")
         _evidence_callout(
             "Analysis method",
             "<b>EPOCH_SECONDS → UTC hour ∈ [0, 23] and weekday ∈ [0, 6]</b> "
-            "(0 = Monday). Volume and median USD_AMOUNT are grouped by UTC hour, "
-            "weekday, ORDERING_TYPE ∈ {B, C}, and the six selected currencies; "
-            "the heatmaps compare B and C side by side for the selected currency "
-            "and measure."
+            f"(0 = Monday). All {len(currencies)} currencies and both measures are shown below. "
+            "Rows compare ORDERING_TYPE B (business) and C (consumer) for each "
+            "measure; columns are currencies."
         )
-        controls = st.columns(2)
-        currency = controls[0].selectbox(
-            "Currency",
-            currencies,
-            index=currencies.index("EUR") if "EUR" in currencies else 0,
-            key="temporal-currency",
+        metric_maxima = {}
+        for metric_column in ("count", "median"):
+            values = frame[metric_column].dropna()
+            metric_maxima[metric_column] = (
+                max(float(values.max()), 1.0) if not values.empty else 1.0
+            )
+
+        figure = make_subplots(
+            rows=len(row_specs),
+            cols=len(currencies),
+            subplot_titles=currencies + [""] * (
+                len(row_specs) * len(currencies) - len(currencies)
+            ),
+            shared_xaxes="columns",
+            shared_yaxes="rows",
+            horizontal_spacing=0.025,
+            vertical_spacing=0.06,
         )
-        metric_label = controls[1].selectbox(
-            "Heatmap measure",
-            ["Transaction volume", "Median USD amount"],
-            key="temporal-measure",
-        )
-        metric_column = "count" if metric_label == "Transaction volume" else "median"
-        frame = pd.DataFrame(rows)
-        selected = frame.loc[
-            frame["currency_code"].eq(currency)
-            & frame["ordering_type"].isin(["B", "C"])
-        ]
-        if selected.empty:
-            st.info(f"No temporal data is available for {currency}.")
-        else:
-            matrices = {}
-            for ordering_type in ("B", "C"):
-                type_rows = selected.loc[
-                    selected["ordering_type"].eq(ordering_type)
+        for row_index, (metric_label, metric_column, ordering_type, row_title) in enumerate(
+            row_specs, start=1
+        ):
+            for col_index, currency in enumerate(currencies, start=1):
+                selected = frame.loc[
+                    frame["currency_code"].eq(currency)
+                    & frame["ordering_type"].eq(ordering_type)
                 ]
-                matrix = type_rows.pivot(
-                    index="utc_day_of_week",
-                    columns="utc_hour_of_day",
-                    values=metric_column,
-                ).reindex(index=range(7), columns=range(24))
+                if selected.empty:
+                    matrix = pd.DataFrame(
+                        index=range(7), columns=range(24), dtype=float
+                    )
+                else:
+                    matrix = selected.pivot(
+                        index="utc_day_of_week",
+                        columns="utc_hour_of_day",
+                        values=metric_column,
+                    ).reindex(index=range(7), columns=range(24))
                 if metric_column == "count":
                     matrix = matrix.fillna(0)
-                matrices[ordering_type] = matrix
 
-            available_values = selected[metric_column].dropna()
-            if available_values.empty:
-                st.info(f"No {metric_label.lower()} data is available for {currency}.")
-            else:
-                zmax = float(available_values.max())
-                if zmax <= 0:
-                    zmax = 1.0
-                figure = make_subplots(
-                    rows=1,
-                    cols=2,
-                    subplot_titles=(
-                        "ORDERING_TYPE B · Business",
-                        "ORDERING_TYPE C · Consumer",
-                    ),
-                    shared_xaxes=True,
-                    shared_yaxes=True,
-                    horizontal_spacing=0.08,
-                )
-                for col, ordering_type in enumerate(("B", "C"), start=1):
-                    matrix = matrices[ordering_type]
-                    figure.add_trace(
-                        go.Heatmap(
-                            z=matrix.to_numpy(dtype=float),
-                            x=list(range(24)),
-                            y=list(range(7)),
-                            zmin=0,
-                            zmax=zmax,
-                            colorscale="Teal",
-                            showscale=col == 2,
-                            colorbar={"title": metric_label, "x": 1.02},
-                            hovertemplate=(
-                                f"ORDERING_TYPE {ordering_type}"
-                                "<br>UTC hour: %{x}:00"
-                                "<br>Weekday: %{customdata}"
-                                f"<br>{metric_label}: %{{z:,.2f}}"
-                                "<extra></extra>"
-                            ),
-                            customdata=[
-                                [DAY_NAMES[day]] * 24 for day in range(7)
-                            ],
+                figure.add_trace(
+                    go.Heatmap(
+                        z=matrix.to_numpy(dtype=float),
+                        x=list(range(24)),
+                        y=list(range(7)),
+                        coloraxis=(
+                            "coloraxis" if metric_column == "count" else "coloraxis2"
                         ),
-                        row=1,
-                        col=col,
-                    )
-                figure.update_xaxes(
-                    title_text="UTC hour of day",
-                    tickmode="array",
-                    tickvals=list(range(0, 24, 2)),
-                    ticktext=[f"{hour:02d}:00" for hour in range(0, 24, 2)],
-                    row=1,
-                    col=1,
+                        hovertemplate=(
+                            f"{currency} · ORDERING_TYPE {ordering_type}"
+                            f"<br>{metric_label}: "
+                            f"%{{z:,.0f}}"
+                            if metric_column == "count"
+                            else f"{currency} · ORDERING_TYPE {ordering_type}"
+                            f"<br>{metric_label}: %{{z:,.2f}}"
+                        )
+                        + "<br>Weekday: %{customdata}"
+                        + "<br>UTC hour: %{x}:00<extra></extra>",
+                        customdata=[
+                            [DAY_NAMES[day]] * 24 for day in range(7)
+                        ],
+                    ),
+                    row=row_index,
+                    col=col_index,
                 )
-                figure.update_xaxes(
-                    title_text="UTC hour of day",
-                    tickmode="array",
-                    tickvals=list(range(0, 24, 2)),
-                    ticktext=[f"{hour:02d}:00" for hour in range(0, 24, 2)],
-                    row=1,
-                    col=2,
-                )
-                for col in (1, 2):
-                    figure.update_yaxes(
-                        title_text="UTC day of week" if col == 1 else None,
-                        tickmode="array",
-                        tickvals=list(range(7)),
-                        ticktext=DAY_NAMES,
-                        autorange="reversed",
-                        row=1,
-                        col=col,
-                    )
-                title = (
-                    f"{metric_label} · {currency} · "
-                    "ORDERING_TYPE B vs C"
-                )
-                figure = _polish_figure(figure, title, height=440)
-                figure.update_layout(
-                    margin={"l": 70, "r": 90, "t": 100, "b": 65},
-                )
-                _show_figure(
-                    figure,
-                    "temporal-patterns",
-                    f"{metric_label} by UTC hour and weekday for {currency}, "
-                    "comparing business and consumer ordering parties.",
-                )
+            figure.update_yaxes(
+                title_text=row_title,
+                tickmode="array",
+                tickvals=list(range(7)),
+                ticktext=DAY_NAMES,
+                autorange="reversed",
+                row=row_index,
+                col=1,
+            )
+        for col_index in range(1, len(currencies) + 1):
+            figure.update_xaxes(
+                tickmode="array",
+                tickvals=[0, 6, 12, 18],
+                ticktext=["00", "06", "12", "18"],
+                row=len(row_specs),
+                col=col_index,
+            )
+
+        figure = _polish_figure(
+            figure,
+            "All currencies · Transaction volume and median USD amount · B vs C",
+            height=390,
+        )
+        figure.update_layout(
+            font={"family": "Arial, sans-serif", "color": COLORS["navy"], "size": 8},
+            margin={"l": 110, "r": 20, "t": 55, "b": 90},
+            coloraxis={
+                "colorscale": "Teal",
+                "cmin": 0,
+                "cmax": metric_maxima["count"],
+                "colorbar": {
+                    "title": {"text": "Transactions", "side": "top"},
+                    "orientation": "h",
+                    "x": 0.27,
+                    "xanchor": "center",
+                    "y": -0.2,
+                    "len": 0.4,
+                    "thickness": 8,
+                    "tickfont": {"size": 7},
+                },
+            },
+            coloraxis2={
+                "colorscale": "Teal",
+                "cmin": 0,
+                "cmax": metric_maxima["median"],
+                "colorbar": {
+                    "title": {"text": "Median USD amount", "side": "top"},
+                    "orientation": "h",
+                    "x": 0.73,
+                    "xanchor": "center",
+                    "y": -0.2,
+                    "len": 0.4,
+                    "thickness": 8,
+                    "tickfont": {"size": 7},
+                },
+            },
+        )
+        figure.update_annotations(font={"size": 9})
+        _show_figure(
+            figure,
+            "temporal-patterns",
+            "All six currencies and both temporal measures, comparing B and C.",
+        )
         st.caption(
-            "Both heatmaps use the same color scale. Select a currency and "
-            "measure before printing; the PDF will show both B and C panels."
+            f"Columns: {', '.join(currencies)}. Rows from top: transaction volume "
+            "for B/C, then median USD amount for B/C. Colors use separate scales "
+            "for the two measures; hour labels are UTC."
         )
         _interpretation(
             "Payment instructions are created and processed across markets that open and close at different local times. "
-            "The UTC heatmaps make global activity comparable, and the paired B/C panels "
-            "help distinguish market-hour effects from differences between business and consumer traffic."
+            "The complete comparison shows market-hour patterns across all currencies, "
+            "measures, and ordering-party types without requiring interactive filters."
         )
 
 
