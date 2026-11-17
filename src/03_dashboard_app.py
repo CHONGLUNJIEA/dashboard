@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +143,9 @@ st.markdown(
         div[class*="st-key-feature-section-"] {
             break-before: page !important;
             page-break-before: always !important;
+        }
+        div[class*="st-key-fx-heatmap-filter"] {
+            display: none !important;
         }
         .stPlotlyChart, [data-testid="stPlotlyChart"], figure,
         .rule-card, .interpretation-card {
@@ -395,7 +399,8 @@ def render_fx(data: dict[str, Any]) -> None:
         _section_header(2, "Foreign Exchange (FX) Steps & Settlement Latency")
         _evidence_callout(
             "Inferred relationship (observational, not causal)",
-            "Controlled cohort (Indirect; exactly 4 participants): median "
+            "Controlled cohort (Indirect; exactly 4 participants; n = valid "
+            "duration records): median "
             "TOTAL_DURATION is "
             f"{_number(controlled_cohort[1]['median'], 1)} (n="
             f"{_number(controlled_cohort[1]['count'])}) at 1 conversion versus "
@@ -495,6 +500,128 @@ def render_fx(data: dict[str, Any]) -> None:
         st.caption(
             "Open markers and hover labels identify low-confidence groups "
             "(n < 30); n counts records with a valid TOTAL_DURATION."
+        )
+
+        st.markdown("#### Duration by participant count and FX conversions")
+        with st.container(key="fx-heatmap-filter"):
+            selected_type = st.segmented_control(
+                "Transaction type",
+                options=["Indirect", "Direct", "Covered"],
+                default="Indirect",
+                key="fx_heatmap_transaction_type",
+            )
+
+        participant_fx_frame = pd.DataFrame(participant_fx_rows)
+        selected_rows = participant_fx_frame.loc[
+            participant_fx_frame["transaction_type_code"].eq(selected_type)
+        ]
+        if selected_rows.empty:
+            st.info("No participant-duration data is available for this transaction type.")
+        else:
+            median_matrix = selected_rows.pivot(
+                index="currency_conversion_count",
+                columns="participant_count",
+                values="median",
+            ).sort_index().sort_index(axis=1)
+            count_matrix = selected_rows.pivot(
+                index="currency_conversion_count",
+                columns="participant_count",
+                values="count",
+            ).reindex(
+                index=median_matrix.index,
+                columns=median_matrix.columns,
+            )
+            median_values = median_matrix.to_numpy(dtype=float)
+            count_values = count_matrix.to_numpy(dtype=float)
+            z_values = [
+                [
+                    math.log10(value)
+                    if pd.notna(value) and value > 0
+                    else None
+                    for value in row
+                ]
+                for row in median_values
+            ]
+            cell_text = [
+                [
+                    f"{value:,.1f}" if pd.notna(value) else ""
+                    for value in row
+                ]
+                for row in median_values
+            ]
+            customdata = [
+                [
+                    [median, count] if pd.notna(median) else [None, None]
+                    for median, count in zip(median_row, count_row)
+                ]
+                for median_row, count_row in zip(median_values, count_values)
+            ]
+            valid_medians = median_values[pd.notna(median_values)]
+            valid_medians = valid_medians[valid_medians > 0]
+            min_duration = float(valid_medians.min())
+            max_duration = float(valid_medians.max())
+            zmin = math.log10(min_duration)
+            zmax = math.log10(max_duration)
+            if zmin == zmax:
+                zmax = zmin + 0.01
+                colorbar_values = [min_duration]
+            else:
+                colorbar_values = [
+                    min_duration,
+                    math.sqrt(min_duration * max_duration),
+                    max_duration,
+                ]
+
+            figure = go.Figure(
+                go.Heatmap(
+                    z=z_values,
+                    x=[int(value) for value in median_matrix.columns],
+                    y=[int(value) for value in median_matrix.index],
+                    customdata=customdata,
+                    text=cell_text,
+                    texttemplate="%{text}",
+                    textfont={"color": COLORS["navy"], "size": 10},
+                    colorscale="Blues",
+                    zmin=zmin,
+                    zmax=zmax,
+                    hoverongaps=False,
+                    colorbar={
+                        "title": "Median duration<br>(log scale)",
+                        "tickvals": [math.log10(value) for value in colorbar_values],
+                        "ticktext": [f"{value:,.0f}" for value in colorbar_values],
+                    },
+                    hovertemplate=(
+                        "Participants: %{x}<br>FX conversions: %{y}"
+                        "<br>Median TOTAL_DURATION: %{customdata[0]:,.1f}"
+                        "<br>n (valid durations): %{customdata[1]:,}"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+            figure.update_xaxes(
+                title_text="Participant count",
+                dtick=1,
+                tickmode="linear",
+            )
+            figure.update_yaxes(
+                title_text="Currency conversion count",
+                dtick=1,
+                tickmode="linear",
+            )
+            _show_figure(
+                _polish_figure(
+                    figure,
+                    f"{selected_type} duration by participants and FX conversions",
+                    height=430,
+                ),
+                "participant-fx-duration",
+                f"Median payment duration by participant and currency-conversion "
+                f"counts for {selected_type} transactions",
+            )
+        st.caption(
+            "Each cell shows the median TOTAL_DURATION; hover for the number "
+            "of records with valid durations. Blank cells have no observations. "
+            "The color scale is logarithmic."
         )
         _interpretation(
             "Every currency conversion can add pricing, liquidity, correspondent-bank, and settlement coordination. "
