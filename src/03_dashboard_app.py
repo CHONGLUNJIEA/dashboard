@@ -634,122 +634,107 @@ def render_temporal(data: dict[str, Any]) -> None:
     section = data["feature_group_3_temporal_circadian_patterns"]
     frame = pd.DataFrame(section["by_hour_day_ordering_type_and_currency"])
     currencies = sorted(section["top_currencies"])
-    row_specs = [
-        ("Transaction volume", "count", "B", "Volume · B"),
-        ("Transaction volume", "count", "C", "Volume · C"),
-        ("Median USD amount", "median", "B", "Median · B"),
-        ("Median USD amount", "median", "C", "Median · C"),
-    ]
+    volume_values = frame["count"].dropna()
+    amount_values = frame["median"].dropna()
+    volume_max = max(float(volume_values.max()), 1.0) if not volume_values.empty else 1.0
+    amount_max = max(float(amount_values.max()), 1.0) if not amount_values.empty else 1.0
+    volume_matrix = []
+    amount_matrix = []
+    volume_hover_data = []
+    amount_hover_data = []
+    y_group_ticks = []
+    y_group_labels = []
+    for currency in currencies:
+        for ordering_type in ("B", "C"):
+            y_group_ticks.append(len(volume_matrix) + 3)
+            y_group_labels.append(f"{currency} · {ordering_type}")
+            type_rows = frame.loc[
+                frame["currency_code"].eq(currency)
+                & frame["ordering_type"].eq(ordering_type)
+            ]
+            for day in range(7):
+                day_rows = type_rows.loc[
+                    type_rows["utc_day_of_week"].eq(day)
+                ].set_index("utc_hour_of_day")
+                counts = (
+                    day_rows["count"]
+                    .reindex(range(24))
+                    .fillna(0)
+                    .astype(float)
+                    .tolist()
+                )
+                amounts = (
+                    day_rows["median"]
+                    .reindex(range(24))
+                    .astype(float)
+                    .tolist()
+                )
+                volume_matrix.append(counts)
+                amount_matrix.append(amounts)
+                volume_hover_data.append(
+                    [
+                        [currency, ordering_type, DAY_NAMES[day], hour]
+                        for hour in range(24)
+                    ]
+                )
+                amount_hover_data.append(
+                    [
+                        [currency, ordering_type, DAY_NAMES[day], hour]
+                        for hour in range(24)
+                    ]
+                )
 
     with _section_container(3):
         _section_header(3, "Temporal Dynamics & Working-Hour Rhythms")
-        _evidence_callout(
-            "Analysis method",
-            "<b>EPOCH_SECONDS → UTC hour ∈ [0, 23] and weekday ∈ [0, 6]</b> "
-            f"(0 = Monday). All {len(currencies)} currencies and both measures are shown below. "
-            "Rows compare ORDERING_TYPE B (business) and C (consumer) for each "
-            "measure; columns are currencies."
+        figure = go.Figure()
+        figure.add_trace(
+            go.Heatmap(
+                z=volume_matrix,
+                x=list(range(24)),
+                y=list(range(len(volume_matrix))),
+                coloraxis="coloraxis",
+                customdata=volume_hover_data,
+                hovertemplate=(
+                    "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
+                    "<br>Weekday: %{customdata[2]}"
+                    "<br>UTC hour: %{customdata[3]}:00"
+                    "<br>Transaction volume: %{z:,.0f}<extra></extra>"
+                ),
+            )
         )
-        metric_maxima = {}
-        for metric_column in ("count", "median"):
-            values = frame[metric_column].dropna()
-            metric_maxima[metric_column] = (
-                max(float(values.max()), 1.0) if not values.empty else 1.0
+        figure.add_trace(
+            go.Heatmap(
+                z=amount_matrix,
+                x=list(range(24, 48)),
+                y=list(range(len(amount_matrix))),
+                coloraxis="coloraxis2",
+                customdata=amount_hover_data,
+                hovertemplate=(
+                    "%{customdata[0]} · ORDERING_TYPE %{customdata[1]}"
+                    "<br>Weekday: %{customdata[2]}"
+                    "<br>UTC hour: %{customdata[3]}:00"
+                    "<br>Median USD amount: %{z:,.2f}<extra></extra>"
+                ),
             )
-
-        figure = make_subplots(
-            rows=len(row_specs),
-            cols=len(currencies),
-            subplot_titles=currencies + [""] * (
-                len(row_specs) * len(currencies) - len(currencies)
-            ),
-            shared_xaxes="columns",
-            shared_yaxes="rows",
-            horizontal_spacing=0.025,
-            vertical_spacing=0.06,
         )
-        for row_index, (metric_label, metric_column, ordering_type, row_title) in enumerate(
-            row_specs, start=1
-        ):
-            for col_index, currency in enumerate(currencies, start=1):
-                selected = frame.loc[
-                    frame["currency_code"].eq(currency)
-                    & frame["ordering_type"].eq(ordering_type)
-                ]
-                if selected.empty:
-                    matrix = pd.DataFrame(
-                        index=range(7), columns=range(24), dtype=float
-                    )
-                else:
-                    matrix = selected.pivot(
-                        index="utc_day_of_week",
-                        columns="utc_hour_of_day",
-                        values=metric_column,
-                    ).reindex(index=range(7), columns=range(24))
-                if metric_column == "count":
-                    matrix = matrix.fillna(0)
-
-                figure.add_trace(
-                    go.Heatmap(
-                        z=matrix.to_numpy(dtype=float),
-                        x=list(range(24)),
-                        y=list(range(7)),
-                        coloraxis=(
-                            "coloraxis" if metric_column == "count" else "coloraxis2"
-                        ),
-                        hovertemplate=(
-                            f"{currency} · ORDERING_TYPE {ordering_type}"
-                            f"<br>{metric_label}: "
-                            f"%{{z:,.0f}}"
-                            if metric_column == "count"
-                            else f"{currency} · ORDERING_TYPE {ordering_type}"
-                            f"<br>{metric_label}: %{{z:,.2f}}"
-                        )
-                        + "<br>Weekday: %{customdata}"
-                        + "<br>UTC hour: %{x}:00<extra></extra>",
-                        customdata=[
-                            [DAY_NAMES[day]] * 24 for day in range(7)
-                        ],
-                    ),
-                    row=row_index,
-                    col=col_index,
-                )
-            figure.update_yaxes(
-                title_text=row_title,
-                tickmode="array",
-                tickvals=list(range(7)),
-                ticktext=DAY_NAMES,
-                autorange="reversed",
-                row=row_index,
-                col=1,
-            )
-        for col_index in range(1, len(currencies) + 1):
-            figure.update_xaxes(
-                tickmode="array",
-                tickvals=[0, 6, 12, 18],
-                ticktext=["00", "06", "12", "18"],
-                row=len(row_specs),
-                col=col_index,
-            )
-
         figure = _polish_figure(
             figure,
-            "All currencies · Transaction volume and median USD amount · B vs C",
-            height=390,
+            "Temporal patterns · All currencies, measures, and ordering types",
+            height=490,
         )
         figure.update_layout(
             font={"family": "Arial, sans-serif", "color": COLORS["navy"], "size": 8},
-            margin={"l": 110, "r": 20, "t": 55, "b": 90},
+            margin={"l": 115, "r": 20, "t": 95, "b": 100},
             coloraxis={
                 "colorscale": "Teal",
                 "cmin": 0,
-                "cmax": metric_maxima["count"],
+                "cmax": volume_max,
                 "colorbar": {
-                    "title": {"text": "Transactions", "side": "top"},
+                    "title": {"text": "Transaction volume", "side": "top"},
                     "orientation": "h",
                     "x": 0.27,
                     "xanchor": "center",
-                    "y": -0.2,
+                    "y": -0.22,
                     "len": 0.4,
                     "thickness": 8,
                     "tickfont": {"size": 7},
@@ -758,34 +743,92 @@ def render_temporal(data: dict[str, Any]) -> None:
             coloraxis2={
                 "colorscale": "Teal",
                 "cmin": 0,
-                "cmax": metric_maxima["median"],
+                "cmax": amount_max,
                 "colorbar": {
                     "title": {"text": "Median USD amount", "side": "top"},
                     "orientation": "h",
                     "x": 0.73,
                     "xanchor": "center",
-                    "y": -0.2,
+                    "y": -0.22,
                     "len": 0.4,
                     "thickness": 8,
                     "tickfont": {"size": 7},
                 },
             },
+            title={
+                "text": "Temporal patterns · All currencies, measures, and ordering types",
+                "x": 0.02,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "top",
+            },
         )
-        figure.update_annotations(font={"size": 9})
+        figure.update_xaxes(
+            title_text="UTC hour of day",
+            tickmode="array",
+            tickvals=[0, 6, 12, 18, 24, 30, 36, 42],
+            ticktext=["00", "06", "12", "18", "00", "06", "12", "18"],
+            range=[-3.5, 47.5],
+            showgrid=False,
+        )
+        figure.update_yaxes(
+            type="linear",
+            title_text="Currency · ORDERING_TYPE",
+            tickmode="array",
+            tickvals=y_group_ticks,
+            ticktext=y_group_labels,
+            autorange="reversed",
+            tickfont={"size": 7},
+            showgrid=False,
+        )
+        figure.add_annotation(
+            text="Transaction volume",
+            x=11.5,
+            y=1.03,
+            xref="x",
+            yref="paper",
+            showarrow=False,
+            font={"size": 9, "color": COLORS["navy"]},
+        )
+        figure.add_annotation(
+            text="Median USD amount",
+            x=35.5,
+            y=1.03,
+            xref="x",
+            yref="paper",
+            showarrow=False,
+            font={"size": 9, "color": COLORS["navy"]},
+        )
+        figure.add_shape(
+            type="line",
+            x0=23.5,
+            x1=23.5,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line={"color": "#FFFFFF", "width": 2},
+        )
+        for boundary in range(7, len(volume_matrix), 7):
+            figure.add_shape(
+                type="line",
+                x0=-0.5,
+                x1=47.5,
+                y0=boundary - 0.5,
+                y1=boundary - 0.5,
+                xref="x",
+                yref="y",
+                line={"color": "#FFFFFF", "width": 1},
+            )
         _show_figure(
             figure,
             "temporal-patterns",
-            "All six currencies and both temporal measures, comparing B and C.",
+            "One heatmap with all currencies, weekday patterns, transaction volume, median amount, and B/C types.",
         )
         st.caption(
-            f"Columns: {', '.join(currencies)}. Rows from top: transaction volume "
-            "for B/C, then median USD amount for B/C. Colors use separate scales "
-            "for the two measures; hour labels are UTC."
-        )
-        _interpretation(
-            "Payment instructions are created and processed across markets that open and close at different local times. "
-            "The complete comparison shows market-hour patterns across all currencies, "
-            "measures, and ordering-party types without requiring interactive filters."
+            f"All currencies: {', '.join(currencies)}. Rows group currency and B/C "
+            "(each 7-row block runs Monday–Sunday); left band: transaction volume, "
+            "right band: median USD. Each band has its own raw-value scale."
         )
 
 
