@@ -118,7 +118,7 @@ st.markdown(
         background-color: #EAF4F8 !important;
     }
     @media print {
-        @page { size: A4 landscape; margin: 0.38in; }
+        @page { size: A4 landscape; margin: 0.25in; }
         html, body, .stApp, [data-testid="stAppViewContainer"] {
             background: #FFFFFF !important; color: #172B3A !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
@@ -139,6 +139,8 @@ st.markdown(
         }
         .block-container {
             max-width: none !important; padding: 0 !important;
+            transform: scale(0.9) !important;
+            transform-origin: top center !important;
         }
         div[class*="st-key-feature-section-"] {
             break-before: page !important;
